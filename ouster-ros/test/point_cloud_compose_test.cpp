@@ -72,3 +72,50 @@ TEST_F(PointCloudComposeTest, MapLidarScanFields) {
         EXPECT_EQ(point::get<8>(pt), near_ir(0, src_idx));
     }
 }
+
+TEST_F(PointCloudComposeTest, MapLidarScanFieldsWithoutWindow) {
+    const auto WIDTH = 5U;
+    const auto HEIGHT = 3U;
+    const auto SAMPLES = WIDTH * HEIGHT;
+
+    // Simulate FW < 3.2 scans where SDK omits WINDOW from LidarScan.
+    LidarScan ls(WIDTH, HEIGHT, UDPProfileLidar::RNG19_RFL8_SIG16_NIR16_DUAL);
+    if (ls.has_field(ChanField::WINDOW)) {
+        ls.del_field(ChanField::WINDOW);
+    }
+
+    auto fill_data = [](auto& img, auto base, auto count) {
+        auto* p = img.data();
+        for (auto i = 0U; i < count; ++i)
+            p[i] =
+                static_cast<std::remove_reference_t<decltype(p[0])>>(base + i);
+    };
+
+    auto range = ls.field<uint32_t>(ChanField::RANGE);
+    auto signal = ls.field<uint16_t>(ChanField::SIGNAL);
+    auto reflect = ls.field<uint8_t>(ChanField::REFLECTIVITY);
+    auto near_ir = ls.field<uint16_t>(ChanField::NEAR_IR);
+    auto flags = ls.field<uint8_t>(ChanField::FLAGS);
+
+    fill_data(range, 1U, SAMPLES);
+    fill_data(signal, 3U, SAMPLES);
+    fill_data(reflect, 5U, SAMPLES);
+    fill_data(near_ir, 7U, SAMPLES);
+    fill_data(flags, 9U, SAMPLES);
+
+    auto ls_tuple =
+        make_lidar_scan_tuple<0, Profile_RNG19_RFL8_SIG16_NIR16_DUAL.size(),
+                              Profile_RNG19_RFL8_SIG16_NIR16_DUAL>(ls);
+
+    ouster_ros::Point_RNG19_RFL8_SIG16_NIR16_DUAL pt;
+
+    for (auto src_idx = 0U; src_idx < SAMPLES; ++src_idx) {
+        copy_lidar_scan_fields_to_point<0>(pt, ls_tuple, src_idx);
+        EXPECT_EQ(point::get<5>(pt), range(0, src_idx));
+        EXPECT_EQ(point::get<6>(pt), signal(0, src_idx));
+        EXPECT_EQ(point::get<7>(pt), reflect(0, src_idx));
+        EXPECT_EQ(point::get<8>(pt), near_ir(0, src_idx));
+        EXPECT_EQ(point::get<9>(pt), flags(0, src_idx));
+        EXPECT_EQ(point::get<10>(pt), 0U);  // WINDOW defaults to zero
+    }
+}

@@ -72,7 +72,12 @@ void map_lidar_scan_fields_to_tuple(Tuple& tp, const ouster::sdk::core::LidarSca
             std::remove_pointer_t<std::tuple_element_t<Index, Tuple>>>;
         static_assert(std::is_same_v<ElementType, FieldType>,
                       "tuple element, field element types mismatch!");
-        std::get<Index>(tp) = ls.field<FieldType>(Table[Index].first).data();
+        if (ls.has_field(Table[Index].first)) {
+            std::get<Index>(tp) =
+                ls.field<FieldType>(Table[Index].first).data();
+        } else {
+            std::get<Index>(tp) = nullptr;
+        }
         map_lidar_scan_fields_to_tuple<Index + 1, N, Table>(tp, ls);
     }
 }
@@ -103,7 +108,14 @@ constexpr auto make_lidar_scan_tuple(const ouster::sdk::core::LidarScan& ls) {
 template <std::size_t Index, typename PointT, typename Tuple>
 void copy_lidar_scan_fields_to_point(PointT& pt, const Tuple& tp, int idx) {
     if constexpr (Index < std::tuple_size_v<Tuple>) {
-        point::get<5 + Index>(pt) = std::get<Index>(tp)[idx];
+        const auto* field_ptr = std::get<Index>(tp);
+        using PointFieldType =
+            std::remove_reference_t<decltype(point::get<5 + Index>(pt))>;
+        if (field_ptr) {
+            point::get<5 + Index>(pt) = static_cast<PointFieldType>(field_ptr[idx]);
+        } else {
+            point::get<5 + Index>(pt) = PointFieldType{0};
+        }
         copy_lidar_scan_fields_to_point<Index + 1>(pt, tp, idx);
     } else {
         unused_variable(pt);
