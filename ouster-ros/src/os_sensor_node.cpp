@@ -17,6 +17,7 @@
 #include "os_sensor_node.h"
 #include <ouster/metadata.h>
 #include "ouster_ros/impl/file_util.h"
+#include "ouster_ros/os_configure_plan.hpp"
 
 using ouster_sensor_msgs::msg::PacketMsg;
 using ouster_sensor_msgs::srv::GetConfig;
@@ -121,22 +122,20 @@ void OusterSensor::declare_parameters() {
 bool OusterSensor::start() {
     sensor_hostname = get_sensor_hostname();
     SensorConfig config;
-    if (staged_config) {
-        if (!configure_sensor(sensor_hostname, staged_config.value()))
-            return false;
+    // staged_config is one-shot: the constructor and the set_config service
+    // fill it, and a successful configure clears it. A later configure,
+    // including native reconnect, rebuilds the requested config from the
+    // current ROS parameters. The sensor active config is not pushed back.
+    const bool from_staged = staged_config.has_value();
+    if (from_staged) {
         config = staged_config.value();
-        staged_config.reset();
     } else {
-        if (!get_active_config_no_throw(sensor_hostname, config))
-            return false;
-
-        RCLCPP_INFO(get_logger(), "Retrieved sensor active config");
-        // Unfortunately it seems we need to invoke this to force the auto
-        // TODO[UN]: find a shortcut
-        // Only reset udp_dest if auto_udp was allowed on startup
-        if (auto_udp_allowed) config.udp_dest.reset();
-        if (!configure_sensor(sensor_hostname, config))
-            return false;
+        config = parse_config_from_ros_parameters();
+    }
+    if (!configure_sensor(sensor_hostname, config))
+        return false;
+    if (from_staged) {
+        staged_config.reset();
     }
 
     reset_last_init_id = true;
@@ -984,11 +983,14 @@ uint8_t OusterSensor::compose_config_flags(
         config_flags |= ouster::sdk::sensor::CONFIG_FORCE_REINIT;
     }
 
-    if (persist_config) {
-        persist_config = false; // avoid persisting configs implicitly on restarts
+    // persist_config is re-read when ROS parameters are parsed again.
+    // Only the first configure that asks to persist may write sensor flash.
+    if (persist_config && !persist_config_consumed_) {
+        persist_config_consumed_ = true;
         RCLCPP_INFO(get_logger(), "Configuration will be persisted");
         config_flags |= ouster::sdk::sensor::CONFIG_PERSIST;
     }
+    persist_config = false;
 
     return config_flags;
 }
