@@ -160,6 +160,11 @@ class OusterSensor : public OusterSensorNodeBase {
     bool get_active_config_no_throw(const std::string& sensor_hostname,
                                     ouster::sdk::core::SensorConfig& config);
 
+    /// Same dormant timer used when start() returns false. Also used when
+    /// start() throws or on_error runs, so those paths are not permanent.
+    /// False when attempt_reconnect is off or no attempts remain.
+    bool schedule_reconnect();
+
    private:
     std::string sensor_hostname;
     std::optional<ouster::sdk::core::SensorConfig> staged_config;

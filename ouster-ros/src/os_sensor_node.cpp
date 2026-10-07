@@ -151,27 +151,51 @@ bool OusterSensor::start() {
     return true;
 }
 
+bool OusterSensor::schedule_reconnect() {
+    if (reconnect_timer) {
+        reconnect_timer->cancel();
+        reconnect_timer.reset();
+    }
+    if (!attempt_reconnect || reconnect_attempts_available <= 0) {
+        return false;
+    }
+    // A zero period would spin the timer callback. Keep the configured
+    // period when it is positive.
+    double period = dormant_period_between_reconnects;
+    if (!(period > 0.0)) {
+        period = 1.0;
+    }
+    auto sleep_duration = std::chrono::duration<double>(period);
+    reconnect_timer = create_wall_timer(sleep_duration, [this]() {
+        if (reconnect_timer) {
+            reconnect_timer->cancel();
+        }
+        if (attempt_reconnect && reconnect_attempts_available-- > 0) {
+            RCLCPP_INFO_STREAM(get_logger(), "Attempting to communicate with the sensor, "
+                                "remaining attempts: " << reconnect_attempts_available);
+
+            auto request_transitions = std::vector<uint8_t>{
+                lifecycle_msgs::msg::Transition::TRANSITION_CONFIGURE,
+                lifecycle_msgs::msg::Transition::TRANSITION_ACTIVATE};
+            execute_transitions_sequence(request_transitions, 0);
+        }
+    });
+    return true;
+}
+
 LifecycleNodeInterface::CallbackReturn OusterSensor::on_configure(
     const rclcpp_lifecycle::State&) {
     RCLCPP_DEBUG(get_logger(), "on_configure() is called.");
 
     try {
         if (!start()) {
-            auto sleep_duration = std::chrono::duration<double>(dormant_period_between_reconnects);
-            reconnect_timer = create_wall_timer(sleep_duration, [this]() {
-                reconnect_timer->cancel();
-                if (attempt_reconnect && reconnect_attempts_available-- > 0) {
-                    RCLCPP_INFO_STREAM(get_logger(), "Attempting to communicate with the sensor, "
-                                        "remaining attempts: " << reconnect_attempts_available);
-
-                    auto request_transitions = std::vector<uint8_t>{
-                        lifecycle_msgs::msg::Transition::TRANSITION_CONFIGURE,
-                        lifecycle_msgs::msg::Transition::TRANSITION_ACTIVATE};
-                    execute_transitions_sequence(request_transitions, 0);
-                }
-            });
+            schedule_reconnect();
             return LifecycleNodeInterface::CallbackReturn::FAILURE;
         } else {
+            if (reconnect_timer) {
+                reconnect_timer->cancel();
+                reconnect_timer.reset();
+            }
             // reset counter
             reconnect_attempts_available =
                 get_parameter("max_failed_reconnect_attempts").as_int();
@@ -181,8 +205,11 @@ LifecycleNodeInterface::CallbackReturn OusterSensor::on_configure(
             get_logger(),
             "exception thrown while configuring the sensor, details: "
                 << ex.what());
-        // TODO: return ERROR on fatal errors, FAILURE otherwise
-        return LifecycleNodeInterface::CallbackReturn::ERROR;
+        // start()==false already waits and retries. A thrown configure
+        // (including create_sensor_client failure) used to return ERROR
+        // with no timer. Schedule the same timer and stay unconfigured.
+        schedule_reconnect();
+        return LifecycleNodeInterface::CallbackReturn::FAILURE;
     }
 
     return LifecycleNodeInterface::CallbackReturn::SUCCESS;
@@ -203,7 +230,11 @@ LifecycleNodeInterface::CallbackReturn OusterSensor::on_activate(
 LifecycleNodeInterface::CallbackReturn OusterSensor::on_error(
     const rclcpp_lifecycle::State&) {
     RCLCPP_DEBUG(get_logger(), "on_error() is called.");
-    // Always return failure for now
+    // SUCCESS returns the node to unconfigured so the same reconnect timer
+    // can request CONFIGURE again. FAILURE finalizes the node.
+    if (schedule_reconnect()) {
+        return LifecycleNodeInterface::CallbackReturn::SUCCESS;
+    }
     return LifecycleNodeInterface::CallbackReturn::FAILURE;
 }
 
