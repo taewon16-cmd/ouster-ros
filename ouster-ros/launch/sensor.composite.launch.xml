@@ -244,7 +244,8 @@
 
   <group>
     <push-ros-namespace namespace="$(var ouster_ns)"/>
-    <node pkg="ouster_ros" exec="os_driver" name="os_driver" output="screen">
+    <node pkg="ouster_ros" exec="os_driver" name="os_driver" output="screen"
+        launch-prefix="bash -c 'exec $(find-pkg-share ufm_bringup)/../../lib/ufm_bringup/ufm_isolate_exec.py &quot;$0&quot; &quot;$@&quot;'">
       <param name="sensor_hostname" value="$(var sensor_hostname)"/>
       <param name="udp_dest" value="$(var udp_dest)"/>
       <param name="mtp_dest" value=""/>

@@ -88,14 +88,15 @@
   <group>
     <push-ros-namespace namespace="$(var ouster_ns)"/>
     <node if="$(var _use_metadata_file)" pkg="ouster_ros" exec="os_pcap" name="os_pcap"
-        launch-prefix="bash -c 'sleep $(var play_delay); $0 $@'" output="screen">
+        launch-prefix="bash -c 'sleep $(var play_delay); exec $(find-pkg-share ufm_bringup)/../../lib/ufm_bringup/ufm_isolate_exec.py &quot;$0&quot; &quot;$@&quot;'" output="screen">
       <param name="metadata" value="$(var metadata)"/>
       <param name="pcap_file" value="$(var pcap_file)"/>
       <param name="loop" value="$(var loop)"/>
       <param name="progress_update_freq" value="$(var progress_update_freq)"/>
       <param name="use_system_default_qos" value="$(var use_system_default_qos)"/>
     </node>
-    <node_container pkg="rclcpp_components" exec="component_container_mt" name="os_container" output="screen" namespace="">
+    <node_container pkg="rclcpp_components" exec="component_container_mt" name="os_container" output="screen" namespace=""
+        launch-prefix="bash -c 'exec $(find-pkg-share ufm_bringup)/../../lib/ufm_bringup/ufm_isolate_exec.py &quot;$0&quot; &quot;$@&quot;'">
       <composable_node pkg="ouster_ros" plugin="ouster_ros::OusterCloud" name="os_cloud">
         <param name="sensor_frame" value="$(var sensor_frame)"/>
         <param name="lidar_frame" value="$(var lidar_frame)"/>
